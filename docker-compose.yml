@@ -1,0 +1,20 @@
+services:
+  hk-backend:
+    build: .
+    container_name: hk-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - DB_HOST=mysql-tienda
+      - DB_PORT=3306
+      - DB_USER=haikus
+      - DB_PASSWORD=kaos2026
+      - DB_NAME=haiku_gnostico
+      - PORT=3001
+    networks:
+      - mysql_default
+
+networks:
+  mysql_default:
+    external: true
