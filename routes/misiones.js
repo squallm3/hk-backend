@@ -61,4 +61,63 @@ router.post('/:id/completar', verificarToken, async (req, res) => {
     const [misiones] = await pool.query(
       'SELECT * FROM misiones WHERE id = ? AND usuarioId = ?', [req.params.id, req.uid]);
     if (misiones.length === 0) return res.status(404).json({ error: 'Misión no encontrada' });
-    const mision =
+    const mision = misiones[0];
+    if (mision.completada) return res.json({ mensaje: 'Ya estaba completada' });
+
+    await pool.query(`
+      UPDATE personajes SET xpAcumulada = xpAcumulada + ? WHERE usuarioId = ? AND activo = 1
+    `, [mision.xpRecompensa, req.uid]);
+
+    await pool.query(`
+      UPDATE misiones SET completada = 1, fechaCompletada = NOW() WHERE id = ?
+    `, [req.params.id]);
+
+    const [personaje] = await pool.query(
+      'SELECT * FROM personajes WHERE usuarioId = ? AND activo = 1', [req.uid]);
+
+    res.json({ mensaje: 'Completada', xpSumada: mision.xpRecompensa, personaje: personaje[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/misiones/:id/desmarcar
+router.post('/:id/desmarcar', verificarToken, async (req, res) => {
+  try {
+    const [misiones] = await pool.query(
+      'SELECT * FROM misiones WHERE id = ? AND usuarioId = ?', [req.params.id, req.uid]);
+    if (misiones.length === 0) return res.status(404).json({ error: 'Misión no encontrada' });
+    const mision = misiones[0];
+    if (!mision.completada) return res.json({ mensaje: 'No estaba completada' });
+
+    await pool.query(`
+      UPDATE personajes SET xpAcumulada = GREATEST(0, xpAcumulada - ?) 
+      WHERE usuarioId = ? AND activo = 1
+    `, [mision.xpRecompensa, req.uid]);
+
+    await pool.query(`
+      UPDATE misiones SET completada = 0, fechaCompletada = NULL WHERE id = ?
+    `, [req.params.id]);
+
+    const [personaje] = await pool.query(
+      'SELECT * FROM personajes WHERE usuarioId = ? AND activo = 1', [req.uid]);
+
+    res.json({ mensaje: 'Desmarcada', xpRestada: mision.xpRecompensa, personaje: personaje[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/misiones/:id
+router.delete('/:id', verificarToken, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE misiones SET deletedAt = NOW() WHERE id = ? AND usuarioId = ?',
+      [req.params.id, req.uid]);
+    res.json({ mensaje: 'Eliminada' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
