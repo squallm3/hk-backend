@@ -28,4 +28,6 @@ const misionesRouter = require('./routes/misiones');
 app.use('/api/misiones', misionesRouter);
 const pleromosRouter = require('./routes/pleromos');
 app.use('/api/pleromos', pleromosRouter);
+const pedidosRouter = require('./routes/pedidos');
+app.use('/api/pedidos', pedidosRouter);
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
