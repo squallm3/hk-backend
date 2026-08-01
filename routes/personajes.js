@@ -62,8 +62,10 @@ router.get('/mio', verificarToken, async (req, res) => {
     await asegurarPersonaje(req.uid);
 
     const [rows] = await pool.query(SELECT_PERSONAJE, [req.uid]);
+    console.log('[GET mio] uid:', req.uid, '| xpAcumulada:', rows[0].xpAcumulada, '| nivelId:', rows[0].nivelId, '| fecha:', new Date().toISOString());
     res.json(rows[0]);
   } catch (err) {
+    console.error('[GET mio] ERROR uid:', req.uid, '| mensaje:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -75,22 +77,32 @@ router.put('/mio/sumar-xp', verificarToken, async (req, res) => {
   try {
     const { delta } = req.body;
     if (typeof delta !== 'number') {
+      console.error('[sumar-xp] delta invalido:', delta, 'uid:', req.uid);
       return res.status(400).json({ error: 'delta invalido' });
     }
 
     await asegurarUsuario(req.uid, req.email);
     await asegurarPersonaje(req.uid);
 
+    const [antes] = await pool.query(
+      'SELECT xpAcumulada FROM personajes WHERE usuarioId = ? AND activo = 1 LIMIT 1',
+      [req.uid]
+    );
+    const xpAntes = antes.length ? antes[0].xpAcumulada : null;
+
     await pool.query(
       'UPDATE personajes SET xpAcumulada = GREATEST(0, xpAcumulada + ?) WHERE usuarioId = ? AND activo = 1',
       [delta, req.uid]
     );
 
-    await recalcularNivel(req.uid);
+    const { xpAcumulada } = await recalcularNivel(req.uid);
+
+    console.log('[sumar-xp] uid:', req.uid, '| xpAntes:', xpAntes, '| delta:', delta, '| xpDespues:', xpAcumulada, '| fecha:', new Date().toISOString());
 
     const [rows] = await pool.query(SELECT_PERSONAJE, [req.uid]);
     res.json(rows[0]);
   } catch (err) {
+    console.error('[sumar-xp] ERROR uid:', req.uid, '| mensaje:', err.message, '| fecha:', new Date().toISOString());
     res.status(500).json({ error: err.message });
   }
 });
@@ -101,11 +113,18 @@ router.put('/mio/establecer-xp', verificarToken, async (req, res) => {
   try {
     const { xpAcumulada } = req.body;
     if (typeof xpAcumulada !== 'number' || xpAcumulada < 0) {
+      console.error('[establecer-xp] xpAcumulada invalida:', xpAcumulada, 'uid:', req.uid);
       return res.status(400).json({ error: 'xpAcumulada invalida' });
     }
 
     await asegurarUsuario(req.uid, req.email);
     await asegurarPersonaje(req.uid);
+
+    const [antes] = await pool.query(
+      'SELECT xpAcumulada FROM personajes WHERE usuarioId = ? AND activo = 1 LIMIT 1',
+      [req.uid]
+    );
+    const xpAntes = antes.length ? antes[0].xpAcumulada : null;
 
     await pool.query(
       'UPDATE personajes SET xpAcumulada = ? WHERE usuarioId = ? AND activo = 1',
@@ -114,9 +133,12 @@ router.put('/mio/establecer-xp', verificarToken, async (req, res) => {
 
     await recalcularNivel(req.uid);
 
+    console.log('[establecer-xp] uid:', req.uid, '| xpAntes:', xpAntes, '| xpNuevo:', xpAcumulada, '| fecha:', new Date().toISOString());
+
     const [rows] = await pool.query(SELECT_PERSONAJE, [req.uid]);
     res.json(rows[0]);
   } catch (err) {
+    console.error('[establecer-xp] ERROR uid:', req.uid, '| mensaje:', err.message, '| fecha:', new Date().toISOString());
     res.status(500).json({ error: err.message });
   }
 });
