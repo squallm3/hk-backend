@@ -44,4 +44,7 @@ app.use('/api/pedidos', pedidosRouter);
 const personajesRouter = require('./routes/personajes');
 app.use('/api/personajes', personajesRouter);
 
+const tareasDiaRouter = require('./routes/tareas-dia');
+app.use('/api/tareas-dia', tareasDiaRouter);
+
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
