@@ -50,4 +50,7 @@ app.use('/api/tareas-dia', tareasDiaRouter);
 const splitRouter = require('./routes/split');
 app.use('/api/split', splitRouter);
 
+const pagosRouter = require('./routes/pagos');
+app.use('/api/pagos', pagosRouter);
+
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
