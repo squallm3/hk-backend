@@ -27,7 +27,7 @@ router.get('/perfil', verificarToken, async (req, res) => {
     if (usuarios.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
 
     const [personajes] = await pool.query(
-      'SELECT p.*, n.titulo, n.artefacto FROM personajes p JOIN niveles n ON p.nivelId = n.id WHERE p.usuarioId = ? AND p.activo = 1',
+      'SELECT p.*, n.titulo, n.artefacto, n.imagenA, n.imagenB FROM personajes p JOIN niveles n ON p.nivelId = n.id WHERE p.usuarioId = ? AND p.activo = 1',
       [req.uid]);
 
     res.json({ ...usuarios[0], personaje: personajes[0] || null });
