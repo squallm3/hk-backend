@@ -21,7 +21,8 @@ router.get('/con-productos', async (req, res) => {
 
     const [productos] = await pool.query(`
       SELECT
-        p.id, p.uuid, p.nombre, p.slug, p.descripcionCorta, p.precio,
+        p.id, p.uuid, p.nombre, p.slug, p.descripcionCorta,
+        p.precio, p.precioOferta,
         p.nivelRequerido, p.rareza, p.stock,
         c.nombre AS categoriaNombre,
         GROUP_CONCAT(pi.url ORDER BY pi.orden) AS imagenes
