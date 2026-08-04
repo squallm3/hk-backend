@@ -13,8 +13,7 @@ services:
       - DB_NAME=haiku_gnostico
       - PORT=3001
     networks:
-      - mysql_default
-
+      - hk-red
 networks:
-  mysql_default:
+  hk-red:
     external: true
