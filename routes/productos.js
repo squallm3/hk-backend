@@ -75,10 +75,12 @@ router.get('/admin', verificarAdmin, async (req, res) => {
       SELECT
         p.*,
         c.nombre AS categoriaNombre,
-        GROUP_CONCAT(pi.url ORDER BY pi.orden) AS imagenes
+        GROUP_CONCAT(DISTINCT pi.url ORDER BY pi.orden) AS imagenes,
+        COUNT(DISTINCT pv.id) AS cantidadVariantes
       FROM productos p
       LEFT JOIN categorias c ON p.categoriaId = c.id
       LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
+      LEFT JOIN producto_variantes pv ON pv.productoId = p.id AND pv.deletedAt IS NULL
       WHERE p.deletedAt IS NULL
       GROUP BY p.id
       ORDER BY p.id
@@ -259,7 +261,7 @@ router.get('/:slug', async (req, res) => {
     const producto = productos[0];
 
     const [variantes] = await pool.query(
-      'SELECT * FROM producto_variantes WHERE productoId = ?',
+      'SELECT * FROM producto_variantes WHERE productoId = ? AND deletedAt IS NULL ORDER BY id',
       [producto.id]
     );
 

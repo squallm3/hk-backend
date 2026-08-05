@@ -59,4 +59,7 @@ app.use('/api/pagos', pagosRouter);
 const uploadsRouter = require('./routes/uploads');
 app.use('/api/uploads', uploadsRouter);
 
+const variantesRouter = require('./routes/variantes');
+app.use('/api/variantes', variantesRouter);
+
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
