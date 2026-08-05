@@ -1,6 +1,7 @@
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const serviceAccount = require('../firebase-service-account.json');
+const pool = require('../db/conexion');
 
 if (!getApps().length) {
   initializeApp({
@@ -24,4 +25,26 @@ async function verificarToken(req, res, next) {
   }
 }
 
-module.exports = { verificarToken };
+// Verifica que el usuario ademas tenga rol de administrador
+async function verificarAdmin(req, res, next) {
+  verificarToken(req, res, async () => {
+    try {
+      const [rows] = await pool.query(
+        'SELECT rol FROM usuarios WHERE id = ?',
+        [req.uid]
+      );
+
+      if (rows.length === 0 || rows[0].rol !== 'admin') {
+        return res.status(403).json({ error: 'Acceso restringido' });
+      }
+
+      req.rol = rows[0].rol;
+      next();
+    } catch (err) {
+      console.error('Error al verificar admin:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+}
+
+module.exports = { verificarToken, verificarAdmin };
