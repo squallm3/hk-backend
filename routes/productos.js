@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/conexion');
+const { verificarAdmin } = require('../middleware/auth');
+const { v4: uuidv4 } = require('uuid');
 
 // GET /api/categorias
 router.get('/categorias', async (req, res) => {
@@ -45,6 +47,123 @@ router.get('/', async (req, res) => {
 
     res.json(productos);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/productos/admin - listado completo para el panel (incluye inactivos)
+router.get('/admin', verificarAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        p.*,
+        c.nombre AS categoriaNombre,
+        GROUP_CONCAT(pi.url ORDER BY pi.orden) AS imagenes
+      FROM productos p
+      LEFT JOIN categorias c ON p.categoriaId = c.id
+      LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
+      WHERE p.deletedAt IS NULL
+      GROUP BY p.id
+      ORDER BY p.id
+    `);
+
+    const productos = rows.map((producto) => ({
+      ...producto,
+      imagenes: producto.imagenes
+        ? producto.imagenes.split(',').map((i) => i.trim()).filter(Boolean)
+        : [],
+    }));
+
+    res.json(productos);
+  } catch (err) {
+    console.error('Error GET /api/productos/admin:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/productos - crear producto
+router.post('/', verificarAdmin, async (req, res) => {
+  try {
+    const {
+      categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
+      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo,
+    } = req.body;
+
+    if (!nombre || !slug || !categoriaId) {
+      return res.status(400).json({ error: 'Faltan nombre, slug o categoria' });
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO productos
+       (uuid, categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
+        precio, precioOferta, nivelRequerido, rareza, peso, stock, activo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        uuidv4(), categoriaId, nombre, slug,
+        descripcionCorta || null, descripcionLarga || null, lore || null,
+        precio || 0, precioOferta || null, nivelRequerido || 1,
+        rareza || 'comun', peso || null, stock || 0,
+        activo === false ? 0 : 1,
+      ]
+    );
+
+    const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [result.insertId]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('Error POST /api/productos:', err.message);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: 'Ya existe un producto con ese slug' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/productos/:id - editar producto
+router.put('/:id', verificarAdmin, async (req, res) => {
+  try {
+    const {
+      categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
+      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo,
+    } = req.body;
+
+    await pool.query(
+      `UPDATE productos SET
+        categoriaId = ?, nombre = ?, slug = ?, descripcionCorta = ?,
+        descripcionLarga = ?, lore = ?, precio = ?, precioOferta = ?,
+        nivelRequerido = ?, rareza = ?, peso = ?, stock = ?, activo = ?
+       WHERE id = ?`,
+      [
+        categoriaId, nombre, slug,
+        descripcionCorta || null, descripcionLarga || null, lore || null,
+        precio || 0, precioOferta || null, nivelRequerido || 1,
+        rareza || 'comun', peso || null, stock || 0,
+        activo === false ? 0 : 1,
+        req.params.id,
+      ]
+    );
+
+    const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error PUT /api/productos:', err.message);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ error: 'Ya existe un producto con ese slug' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/productos/:id - baja logica
+router.delete('/:id', verificarAdmin, async (req, res) => {
+  try {
+    await pool.query(
+      'UPDATE productos SET deletedAt = NOW(), activo = 0 WHERE id = ?',
+      [req.params.id]
+    );
+    res.json({ mensaje: 'Producto eliminado' });
+  } catch (err) {
+    console.error('Error DELETE /api/productos:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
