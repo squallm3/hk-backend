@@ -7,6 +7,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Archivos subidos (imagenes de productos, etc)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Health check
 app.get('/health', async (req, res) => {
   const pool = require('./db/conexion');
@@ -52,5 +55,8 @@ app.use('/api/split', splitRouter);
 
 const pagosRouter = require('./routes/pagos');
 app.use('/api/pagos', pagosRouter);
+
+const uploadsRouter = require('./routes/uploads');
+app.use('/api/uploads', uploadsRouter);
 
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
