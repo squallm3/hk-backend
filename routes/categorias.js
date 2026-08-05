@@ -34,7 +34,18 @@ router.get('/:slug', async (req, res) => {
       ORDER BY p.id
     `, [categoria.id]);
 
-    res.json({ ...categoria, productos });
+    // Normalizamos las imagenes a array, igual que en el resto de los endpoints
+    const productosNormalizados = productos.map((producto) => ({
+      ...producto,
+      imagenes: producto.imagenes
+        ? producto.imagenes
+            .split(',')
+            .map((img) => img.trim())
+            .filter(Boolean)
+        : [],
+    }));
+
+    res.json({ ...categoria, productos: productosNormalizados });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
