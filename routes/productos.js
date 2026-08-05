@@ -4,6 +4,23 @@ const pool = require('../db/conexion');
 const { verificarAdmin } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
 
+// Guarda las imagenes de un producto (borra las anteriores y carga las nuevas)
+async function guardarImagenes(productoId, imagenes) {
+  if (!Array.isArray(imagenes)) return;
+
+  await pool.query('DELETE FROM producto_imagenes WHERE productoId = ?', [productoId]);
+
+  const limpias = imagenes.map((u) => String(u).trim()).filter(Boolean);
+
+  for (let i = 0; i < limpias.length; i++) {
+    await pool.query(
+      `INSERT INTO producto_imagenes (uuid, productoId, url, tipo, orden)
+       VALUES (?, ?, ?, 'producto', ?)`,
+      [uuidv4(), productoId, limpias[i], i]
+    );
+  }
+}
+
 // GET /api/categorias
 router.get('/categorias', async (req, res) => {
   try {
@@ -86,7 +103,7 @@ router.post('/', verificarAdmin, async (req, res) => {
   try {
     const {
       categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
-      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo,
+      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo, imagenes,
     } = req.body;
 
     if (!nombre || !slug || !categoriaId) {
@@ -107,6 +124,8 @@ router.post('/', verificarAdmin, async (req, res) => {
       ]
     );
 
+    await guardarImagenes(result.insertId, imagenes);
+
     const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -123,7 +142,7 @@ router.put('/:id', verificarAdmin, async (req, res) => {
   try {
     const {
       categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
-      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo,
+      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo, imagenes,
     } = req.body;
 
     await pool.query(
@@ -141,6 +160,8 @@ router.put('/:id', verificarAdmin, async (req, res) => {
         req.params.id,
       ]
     );
+
+    await guardarImagenes(req.params.id, imagenes);
 
     const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Producto no encontrado' });
