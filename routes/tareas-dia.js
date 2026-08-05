@@ -3,13 +3,21 @@ const router = express.Router();
 const pool = require('../db/conexion');
 const { verificarToken } = require('../middleware/auth');
 
-// GET /api/tareas-dia/hoy
-// Devuelve las tareas de HOY (fecha del servidor) del usuario logueado
+const FECHA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+// GET /api/tareas-dia/hoy?fecha=YYYY-MM-DD
+// La fecha la manda el navegador (su hora local real), NUNCA el reloj del servidor,
+// para evitar que el huso horario de MySQL/Docker (por defecto UTC) desalinee "hoy".
 router.get('/hoy', verificarToken, async (req, res) => {
   try {
+    const fecha = req.query.fecha;
+    if (!fecha || !FECHA_REGEX.test(fecha)) {
+      return res.status(400).json({ error: 'fecha invalida (formato YYYY-MM-DD)' });
+    }
+
     const [rows] = await pool.query(
-      'SELECT id, descripcion, xp, createdAt FROM tareas_dia WHERE usuarioId = ? AND fecha = CURDATE() ORDER BY createdAt ASC',
-      [req.uid]
+      'SELECT id, descripcion, xp, createdAt FROM tareas_dia WHERE usuarioId = ? AND fecha = ? ORDER BY createdAt ASC',
+      [req.uid, fecha]
     );
     res.json(rows);
   } catch (err) {
@@ -17,21 +25,24 @@ router.get('/hoy', verificarToken, async (req, res) => {
   }
 });
 
-// POST /api/tareas-dia  { descripcion, xp }
-// Registra una tarea nueva con la fecha de HOY (fecha del servidor)
+// POST /api/tareas-dia  { descripcion, xp, fecha }
+// La fecha tambien la manda el navegador, por la misma razon.
 router.post('/', verificarToken, async (req, res) => {
   try {
-    const { descripcion, xp } = req.body;
+    const { descripcion, xp, fecha } = req.body;
     if (typeof descripcion !== 'string' || !descripcion.trim()) {
       return res.status(400).json({ error: 'descripcion invalida' });
     }
     if (typeof xp !== 'number') {
       return res.status(400).json({ error: 'xp invalido' });
     }
+    if (!fecha || !FECHA_REGEX.test(fecha)) {
+      return res.status(400).json({ error: 'fecha invalida (formato YYYY-MM-DD)' });
+    }
 
     const [result] = await pool.query(
-      'INSERT INTO tareas_dia (usuarioId, fecha, descripcion, xp) VALUES (?, CURDATE(), ?, ?)',
-      [req.uid, descripcion.trim(), xp]
+      'INSERT INTO tareas_dia (usuarioId, fecha, descripcion, xp) VALUES (?, ?, ?, ?)',
+      [req.uid, fecha, descripcion.trim(), xp]
     );
 
     res.json({ id: result.insertId, descripcion: descripcion.trim(), xp });
@@ -41,7 +52,7 @@ router.post('/', verificarToken, async (req, res) => {
 });
 
 // DELETE /api/tareas-dia/:id
-// Elimina una tarea del dia (solo si pertenece al usuario logueado)
+// Elimina una tarea del dia (solo si pertenece al usuario logueado). No depende de fechas.
 router.delete('/:id', verificarToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
