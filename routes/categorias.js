@@ -34,14 +34,50 @@ router.get('/admin', verificarAdmin, async (req, res) => {
   }
 });
 
+// PUT /api/categorias/reordenar - reasigna el orden 1,2,3... segun la lista recibida
+router.put('/reordenar', verificarAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Falta la lista de ids' });
+    }
+
+    await connection.beginTransaction();
+
+    for (let i = 0; i < ids.length; i++) {
+      await connection.query(
+        'UPDATE categorias SET orden = ? WHERE id = ?',
+        [i + 1, ids[i]]
+      );
+    }
+
+    await connection.commit();
+    res.json({ mensaje: 'Orden actualizado' });
+  } catch (err) {
+    await connection.rollback();
+    console.error('Error PUT /api/categorias/reordenar:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // POST /api/categorias - crear categoria
 router.post('/', verificarAdmin, async (req, res) => {
   try {
-    const { nombre, slug, descripcion, icono, orden, activa } = req.body;
+    const { nombre, slug, descripcion, icono, activa } = req.body;
 
     if (!nombre || !slug) {
       return res.status(400).json({ error: 'Faltan nombre o slug' });
     }
+
+    // La nueva categoria va al final
+    const [maximo] = await pool.query(
+      'SELECT COALESCE(MAX(orden), 0) AS maximo FROM categorias WHERE deletedAt IS NULL'
+    );
+    const nuevoOrden = maximo[0].maximo + 1;
 
     const [result] = await pool.query(
       `INSERT INTO categorias (uuid, nombre, slug, descripcion, icono, orden, activa)
@@ -49,7 +85,7 @@ router.post('/', verificarAdmin, async (req, res) => {
       [
         uuidv4(), nombre, slug,
         descripcion || null, icono || null,
-        orden || 0,
+        nuevoOrden,
         activa === false ? 0 : 1,
       ]
     );
@@ -65,10 +101,10 @@ router.post('/', verificarAdmin, async (req, res) => {
   }
 });
 
-// PUT /api/categorias/:id - editar categoria
+// PUT /api/categorias/:id - editar categoria (el orden se maneja aparte)
 router.put('/:id', verificarAdmin, async (req, res) => {
   try {
-    const { nombre, slug, descripcion, icono, orden, activa } = req.body;
+    const { nombre, slug, descripcion, icono, activa } = req.body;
 
     if (!nombre || !slug) {
       return res.status(400).json({ error: 'Faltan nombre o slug' });
@@ -76,12 +112,11 @@ router.put('/:id', verificarAdmin, async (req, res) => {
 
     await pool.query(
       `UPDATE categorias SET
-        nombre = ?, slug = ?, descripcion = ?, icono = ?, orden = ?, activa = ?
+        nombre = ?, slug = ?, descripcion = ?, icono = ?, activa = ?
        WHERE id = ?`,
       [
         nombre, slug,
         descripcion || null, icono || null,
-        orden || 0,
         activa === false ? 0 : 1,
         req.params.id,
       ]
