@@ -100,6 +100,54 @@ router.get('/admin', verificarAdmin, async (req, res) => {
   }
 });
 
+// PUT /api/productos/masivo - edicion masiva de precio y oferta
+router.put('/masivo', verificarAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const { ids, precio, aplicarOferta, precioOferta } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Falta la lista de productos' });
+    }
+
+    await connection.beginTransaction();
+
+    const placeholders = ids.map(() => '?').join(',');
+
+    if (precio !== null && precio !== undefined && precio !== '') {
+      await connection.query(
+        `UPDATE productos SET precio = ? WHERE id IN (${placeholders})`,
+        [Number(precio), ...ids]
+      );
+    }
+
+    if (aplicarOferta) {
+      if (precioOferta === null || precioOferta === undefined || precioOferta === '') {
+        await connection.rollback();
+        return res.status(400).json({ error: 'Falta el precio de oferta' });
+      }
+      await connection.query(
+        `UPDATE productos SET precioOferta = ? WHERE id IN (${placeholders})`,
+        [Number(precioOferta), ...ids]
+      );
+    } else {
+      await connection.query(
+        `UPDATE productos SET precioOferta = NULL WHERE id IN (${placeholders})`,
+        ids
+      );
+    }
+
+    await connection.commit();
+    res.json({ mensaje: `${ids.length} producto(s) actualizado(s)` });
+  } catch (err) {
+    await connection.rollback();
+    console.error('Error PUT /api/productos/masivo:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // POST /api/productos - crear producto
 router.post('/', verificarAdmin, async (req, res) => {
   try {
