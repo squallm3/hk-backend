@@ -176,6 +176,14 @@ router.post('/', verificarAdmin, async (req, res) => {
 
     await guardarImagenes(result.insertId, imagenes);
 
+    // Todo producto nace con una variante "Unica" para poder venderse
+    // desde el primer momento, aunque no tenga talle/color reales.
+    await pool.query(
+      `INSERT INTO producto_variantes (uuid, productoId, talle, color, stock, precioExtra)
+       VALUES (?, ?, NULL, NULL, ?, 0)`,
+      [uuidv4(), result.insertId, stock || 0]
+    );
+
     const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
   } catch (err) {
