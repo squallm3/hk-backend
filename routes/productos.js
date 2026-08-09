@@ -76,7 +76,8 @@ router.get('/admin', verificarAdmin, async (req, res) => {
         p.*,
         c.nombre AS categoriaNombre,
         GROUP_CONCAT(DISTINCT pi.url ORDER BY pi.orden) AS imagenes,
-        COUNT(DISTINCT pv.id) AS cantidadVariantes
+        COUNT(DISTINCT pv.id) AS cantidadVariantes,
+        COALESCE(SUM(DISTINCT pv.stock), 0) AS stockVariantes
       FROM productos p
       LEFT JOIN categorias c ON p.categoriaId = c.id
       LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
@@ -153,7 +154,7 @@ router.post('/', verificarAdmin, async (req, res) => {
   try {
     const {
       categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
-      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo, imagenes,
+      precio, precioOferta, nivelRequerido, rareza, peso, activo, imagenes,
     } = req.body;
 
     if (!nombre || !slug || !categoriaId) {
@@ -164,12 +165,12 @@ router.post('/', verificarAdmin, async (req, res) => {
       `INSERT INTO productos
        (uuid, categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
         precio, precioOferta, nivelRequerido, rareza, peso, stock, activo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [
         uuidv4(), categoriaId, nombre, slug,
         descripcionCorta || null, descripcionLarga || null, lore || null,
         precio || 0, precioOferta || null, nivelRequerido || 1,
-        rareza || 'comun', peso || null, stock || 0,
+        rareza || 'comun', peso || null,
         activo === false ? 0 : 1,
       ]
     );
@@ -177,11 +178,11 @@ router.post('/', verificarAdmin, async (req, res) => {
     await guardarImagenes(result.insertId, imagenes);
 
     // Todo producto nace con una variante "Unica" para poder venderse
-    // desde el primer momento, aunque no tenga talle/color reales.
+    // desde el primer momento. El admin carga el stock real en Variantes.
     await pool.query(
       `INSERT INTO producto_variantes (uuid, productoId, talle, color, stock, precioExtra)
-       VALUES (?, ?, NULL, NULL, ?, 0)`,
-      [uuidv4(), result.insertId, stock || 0]
+       VALUES (?, ?, NULL, NULL, 0, 0)`,
+      [uuidv4(), result.insertId]
     );
 
     const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [result.insertId]);
@@ -200,20 +201,20 @@ router.put('/:id', verificarAdmin, async (req, res) => {
   try {
     const {
       categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
-      precio, precioOferta, nivelRequerido, rareza, peso, stock, activo, imagenes,
+      precio, precioOferta, nivelRequerido, rareza, peso, activo, imagenes,
     } = req.body;
 
     await pool.query(
       `UPDATE productos SET
         categoriaId = ?, nombre = ?, slug = ?, descripcionCorta = ?,
         descripcionLarga = ?, lore = ?, precio = ?, precioOferta = ?,
-        nivelRequerido = ?, rareza = ?, peso = ?, stock = ?, activo = ?
+        nivelRequerido = ?, rareza = ?, peso = ?, activo = ?
        WHERE id = ?`,
       [
         categoriaId, nombre, slug,
         descripcionCorta || null, descripcionLarga || null, lore || null,
         precio || 0, precioOferta || null, nivelRequerido || 1,
-        rareza || 'comun', peso || null, stock || 0,
+        rareza || 'comun', peso || null,
         activo === false ? 0 : 1,
         req.params.id,
       ]
