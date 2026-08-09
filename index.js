@@ -74,4 +74,7 @@ app.use('/api/transacciones', transaccionesRouter);
 const promptsRouter = require('./routes/prompts');
 app.use('/api/prompts', promptsRouter);
 
+const dietaRouter = require('./routes/dieta');
+app.use('/api/dieta', dietaRouter);
+
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
