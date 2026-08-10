@@ -9,7 +9,6 @@ services:
       - DB_HOST=mysql-tienda
       - DB_PORT=3306
       - DB_USER=haikus
-      - DB_PASSWORD=kaos2026
       - DB_NAME=haiku_gnostico
       - PORT=3001
     env_file:
