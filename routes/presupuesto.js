@@ -5,7 +5,8 @@ const { verificarToken } = require('../middleware/auth');
 const { randomUUID } = require('crypto');
 
 // GET /api/presupuesto?mes=YYYY-MM
-// Devuelve, para cada categoría, cuánto se asignó y cuánto se gastó ese mes
+// Devuelve, para cada categoría: lo asignado ESTE mes, lo gastado ESTE mes,
+// y el "disponible" ACUMULADO (arrastra el sobrante o el déficit de meses anteriores).
 router.get('/', verificarToken, async (req, res) => {
   try {
     const mes = req.query.mes;
@@ -16,7 +17,6 @@ router.get('/', verificarToken, async (req, res) => {
       `SELECT
          cg.id AS categoriaId,
          cg.nombre AS categoriaNombre,
-         COALESCE(pc.id, NULL) AS presupuestoId,
          COALESCE(pc.montoAsignado, 0) AS montoAsignado,
          COALESCE((
            SELECT SUM(-t.monto) FROM transacciones t
@@ -25,13 +25,26 @@ router.get('/', verificarToken, async (req, res) => {
              AND t.deletedAt IS NULL
              AND t.monto < 0
              AND DATE_FORMAT(t.fecha, '%Y-%m') = ?
-         ), 0) AS gastado
+         ), 0) AS gastado,
+         COALESCE((
+           SELECT SUM(pc2.montoAsignado) FROM presupuestos_categoria pc2
+           WHERE pc2.categoriaId = cg.id AND pc2.usuarioId = ? AND pc2.mes <= ?
+         ), 0)
+         -
+         COALESCE((
+           SELECT SUM(-t2.monto) FROM transacciones t2
+           WHERE t2.categoriaId = cg.id
+             AND t2.usuarioId = ?
+             AND t2.deletedAt IS NULL
+             AND t2.monto < 0
+             AND DATE_FORMAT(t2.fecha, '%Y-%m') <= ?
+         ), 0) AS disponible
        FROM categorias_gasto cg
        LEFT JOIN presupuestos_categoria pc
          ON pc.categoriaId = cg.id AND pc.usuarioId = ? AND pc.mes = ?
        WHERE cg.usuarioId = ? AND cg.deletedAt IS NULL
        ORDER BY cg.nombre`,
-      [req.uid, mes, req.uid, mes, req.uid]
+      [req.uid, mes, req.uid, mes, req.uid, mes, req.uid, mes, req.uid]
     );
     res.json(rows);
   } catch (err) {
