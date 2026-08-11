@@ -559,4 +559,201 @@ router.delete('/pagos/:uuid', verificarToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// PUT /api/split/gastos/:uuid — editar un gasto ya cargado
+// Mismo body que el POST de creación. Reemplaza descripcion,
+// categoria, monto, quien pago, tipo de reparto y las partes.
+// Se borran las partes viejas y se insertan las nuevas dentro de
+// la misma transaccion: no queda un estado intermedio inconsistente
+// si algo falla a mitad de camino.
+// ─────────────────────────────────────────────────────────────
+router.put('/gastos/:uuid', verificarToken, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const [gastosExistentes] = await connection.query(
+      `SELECT g.id, g.grupoId FROM split_gastos g
+       WHERE g.uuid = ? AND g.deletedAt IS NULL`,
+      [req.params.uuid]
+    );
+    if (gastosExistentes.length === 0) {
+      return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
+    const gastoId = gastosExistentes[0].id;
+    const grupoId = gastosExistentes[0].grupoId;
+
+    // Mismo chequeo de acceso que en el resto de las rutas: el
+    // usuario tiene que ser miembro activo del grupo dueño del gasto.
+    const [miembrosAcceso] = await connection.query(
+      `SELECT id FROM split_grupo_miembros
+       WHERE grupoId = ? AND usuarioId = ? AND deletedAt IS NULL AND activo = 1`,
+      [grupoId, req.uid]
+    );
+    if (miembrosAcceso.length === 0) {
+      return res.status(404).json({ error: 'Gasto no encontrado' });
+    }
+
+    const {
+      descripcion,
+      monto,
+      categoria,
+      fecha,
+      pagadoPorId,
+      tipoReparto,
+      participantes,
+      valores,
+    } = req.body;
+
+    if (typeof descripcion !== 'string' || !descripcion.trim()) {
+      return res.status(400).json({ error: 'El gasto necesita una descripcion' });
+    }
+
+    const totalCentavos = aCentavos(monto);
+    if (!Number.isFinite(totalCentavos) || totalCentavos <= 0) {
+      return res.status(400).json({ error: 'El monto tiene que ser mayor a cero' });
+    }
+
+    const [miembrosGrupo] = await connection.query(
+      `SELECT id FROM split_grupo_miembros
+       WHERE grupoId = ? AND deletedAt IS NULL`,
+      [grupoId]
+    );
+    const idsValidos = new Set(miembrosGrupo.map((m) => m.id));
+
+    if (!idsValidos.has(Number(pagadoPorId))) {
+      return res.status(400).json({ error: 'Quien pago no es miembro del grupo' });
+    }
+
+    const ids = (Array.isArray(participantes) ? participantes : []).map(Number);
+    if (ids.some((id) => !idsValidos.has(id))) {
+      return res
+        .status(400)
+        .json({ error: 'Hay participantes que no son miembros del grupo' });
+    }
+
+    const resultado = calcularPartes(
+      tipoReparto || 'igual',
+      totalCentavos,
+      ids,
+      valores || {}
+    );
+    if (resultado.error) {
+      return res.status(400).json({ error: resultado.error });
+    }
+
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE split_gastos
+         SET descripcion = ?, categoria = ?, monto = ?, pagadoPorId = ?,
+             tipoReparto = ?, fecha = COALESCE(?, fecha)
+       WHERE id = ?`,
+      [
+        descripcion.trim(),
+        categoria || 'otros',
+        aDecimal(totalCentavos),
+        Number(pagadoPorId),
+        tipoReparto || 'igual',
+        fecha || null,
+        gastoId,
+      ]
+    );
+
+    // Se reemplazan todas las partes: es mas simple y menos propenso
+    // a errores que calcular un diff entre las partes viejas y las
+    // nuevas, y el volumen de filas por gasto es chico.
+    await connection.query('DELETE FROM split_gasto_partes WHERE gastoId = ?', [
+      gastoId,
+    ]);
+
+    for (const [miembroId, centavos] of Object.entries(resultado.partes)) {
+      await connection.query(
+        `INSERT INTO split_gasto_partes (gastoId, miembroId, monto) VALUES (?, ?, ?)`,
+        [gastoId, Number(miembroId), aDecimal(centavos)]
+      );
+    }
+
+    await connection.commit();
+
+    const [gastos] = await connection.query(
+      'SELECT * FROM split_gastos WHERE id = ?',
+      [gastoId]
+    );
+    const [partes] = await connection.query(
+      'SELECT miembroId, monto FROM split_gasto_partes WHERE gastoId = ?',
+      [gastoId]
+    );
+
+    res.json({ ...gastos[0], partes });
+  } catch (err) {
+    await connection.rollback();
+    console.error('Error PUT /api/split/gastos/:uuid:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// PUT /api/split/pagos/:uuid — editar un pago ya registrado
+// body: { deMiembroId, aMiembroId, monto, fecha?, notas? }
+// ─────────────────────────────────────────────────────────────
+router.put('/pagos/:uuid', verificarToken, async (req, res) => {
+  try {
+    const [pagosExistentes] = await pool.query(
+      'SELECT id, grupoId FROM split_pagos WHERE uuid = ? AND deletedAt IS NULL',
+      [req.params.uuid]
+    );
+    if (pagosExistentes.length === 0) {
+      return res.status(404).json({ error: 'Pago no encontrado' });
+    }
+    const pagoId = pagosExistentes[0].id;
+    const grupoId = pagosExistentes[0].grupoId;
+
+    const [miembrosAcceso] = await pool.query(
+      `SELECT id FROM split_grupo_miembros
+       WHERE grupoId = ? AND usuarioId = ? AND deletedAt IS NULL AND activo = 1`,
+      [grupoId, req.uid]
+    );
+    if (miembrosAcceso.length === 0) {
+      return res.status(404).json({ error: 'Pago no encontrado' });
+    }
+
+    const { deMiembroId, aMiembroId, monto, fecha, notas } = req.body;
+
+    const de = Number(deMiembroId);
+    const a = Number(aMiembroId);
+    if (de === a) {
+      return res.status(400).json({ error: 'El pago tiene que ser entre dos personas distintas' });
+    }
+
+    const centavos = aCentavos(monto);
+    if (!Number.isFinite(centavos) || centavos <= 0) {
+      return res.status(400).json({ error: 'El monto tiene que ser mayor a cero' });
+    }
+
+    const [miembrosGrupo] = await pool.query(
+      'SELECT id FROM split_grupo_miembros WHERE grupoId = ? AND deletedAt IS NULL',
+      [grupoId]
+    );
+    const idsValidos = new Set(miembrosGrupo.map((m) => m.id));
+    if (!idsValidos.has(de) || !idsValidos.has(a)) {
+      return res.status(400).json({ error: 'Alguna de las dos personas no es miembro del grupo' });
+    }
+
+    await pool.query(
+      `UPDATE split_pagos
+         SET deMiembroId = ?, aMiembroId = ?, monto = ?,
+             fecha = COALESCE(?, fecha), notas = ?
+       WHERE id = ?`,
+      [de, a, aDecimal(centavos), fecha || null, notas || null, pagoId]
+    );
+
+    const [actualizado] = await pool.query('SELECT * FROM split_pagos WHERE id = ?', [pagoId]);
+    res.json(actualizado[0]);
+  } catch (err) {
+    console.error('Error PUT /api/split/pagos/:uuid:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
