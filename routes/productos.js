@@ -4,6 +4,8 @@ const pool = require('../db/conexion');
 const { verificarAdmin } = require('../middleware/auth');
 const { v4: uuidv4 } = require('uuid');
 
+const LIMITE_DESTACADOS = 9;
+
 // Guarda las imagenes de un producto (borra las anteriores y carga las nuevas)
 async function guardarImagenes(productoId, imagenes) {
   if (!Array.isArray(imagenes)) return;
@@ -68,6 +70,36 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/productos/destacados - productos marcados a mano, en el orden en que se marcaron
+router.get('/destacados', async (req, res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        p.*,
+        c.nombre AS categoriaNombre,
+        GROUP_CONCAT(DISTINCT pi.url ORDER BY pi.orden) AS imagenes
+      FROM productos p
+      LEFT JOIN categorias c ON p.categoriaId = c.id
+      LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
+      WHERE p.activo = 1 AND p.destacado = 1
+      GROUP BY p.id
+      ORDER BY p.destacadoOrden ASC
+    `);
+
+    const productos = rows.map((producto) => ({
+      ...producto,
+      imagenes: producto.imagenes
+        ? producto.imagenes.split(',').map((i) => i.trim()).filter(Boolean)
+        : [],
+    }));
+
+    res.json(productos);
+  } catch (err) {
+    console.error('Error GET /api/productos/destacados:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/productos/admin - listado completo para el panel (incluye inactivos)
 router.get('/admin', verificarAdmin, async (req, res) => {
   try {
@@ -97,6 +129,47 @@ router.get('/admin', verificarAdmin, async (req, res) => {
     res.json(productos);
   } catch (err) {
     console.error('Error GET /api/productos/admin:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/productos/:id/destacado - marca o desmarca un producto como destacado
+router.put('/:id/destacado', verificarAdmin, async (req, res) => {
+  try {
+    const { destacado } = req.body;
+
+    if (destacado) {
+      const [conteo] = await pool.query(
+        'SELECT COUNT(*) AS total FROM productos WHERE destacado = 1 AND id != ?',
+        [req.params.id]
+      );
+
+      if (conteo[0].total >= LIMITE_DESTACADOS) {
+        return res.status(400).json({
+          error: `Ya hay ${LIMITE_DESTACADOS} productos destacados. Desmarcá alguno antes de agregar otro.`,
+        });
+      }
+
+      const [maximo] = await pool.query(
+        'SELECT COALESCE(MAX(destacadoOrden), 0) AS maximo FROM productos WHERE destacado = 1'
+      );
+
+      await pool.query(
+        'UPDATE productos SET destacado = 1, destacadoOrden = ? WHERE id = ?',
+        [maximo[0].maximo + 1, req.params.id]
+      );
+    } else {
+      await pool.query(
+        'UPDATE productos SET destacado = 0, destacadoOrden = NULL WHERE id = ?',
+        [req.params.id]
+      );
+    }
+
+    const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Producto no encontrado' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error PUT /api/productos/:id/destacado:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
