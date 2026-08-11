@@ -7,18 +7,28 @@ const { v4: uuidv4 } = require('uuid');
 const LIMITE_DESTACADOS = 9;
 
 // Guarda las imagenes de un producto (borra las anteriores y carga las nuevas)
-async function guardarImagenes(productoId, imagenes) {
-  if (!Array.isArray(imagenes)) return;
-
+// y opcionalmente un video de YouTube, que se guarda en la misma tabla
+// con tipo 'video' y va siempre despues de todas las fotos.
+async function guardarImagenes(productoId, imagenes, videoUrl) {
   await pool.query('DELETE FROM producto_imagenes WHERE productoId = ?', [productoId]);
 
-  const limpias = imagenes.map((u) => String(u).trim()).filter(Boolean);
+  const limpias = Array.isArray(imagenes)
+    ? imagenes.map((u) => String(u).trim()).filter(Boolean)
+    : [];
 
   for (let i = 0; i < limpias.length; i++) {
     await pool.query(
       `INSERT INTO producto_imagenes (uuid, productoId, url, tipo, orden)
        VALUES (?, ?, ?, 'producto', ?)`,
       [uuidv4(), productoId, limpias[i], i]
+    );
+  }
+
+  if (videoUrl && String(videoUrl).trim()) {
+    await pool.query(
+      `INSERT INTO producto_imagenes (uuid, productoId, url, tipo, orden)
+       VALUES (?, ?, ?, 'video', ?)`,
+      [uuidv4(), productoId, String(videoUrl).trim(), limpias.length]
     );
   }
 }
@@ -48,7 +58,7 @@ router.get('/', async (req, res) => {
       LEFT JOIN categorias c
         ON p.categoriaId = c.id
       LEFT JOIN producto_imagenes pi
-        ON p.id = pi.productoId
+        ON p.id = pi.productoId AND pi.tipo != 'video'
       WHERE p.activo = 1
       GROUP BY p.id
       ORDER BY p.id
@@ -80,7 +90,7 @@ router.get('/destacados', async (req, res) => {
         GROUP_CONCAT(DISTINCT pi.url ORDER BY pi.orden) AS imagenes
       FROM productos p
       LEFT JOIN categorias c ON p.categoriaId = c.id
-      LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
+      LEFT JOIN producto_imagenes pi ON p.id = pi.productoId AND pi.tipo != 'video'
       WHERE p.activo = 1 AND p.destacado = 1
       GROUP BY p.id
       ORDER BY p.destacadoOrden ASC
@@ -107,12 +117,13 @@ router.get('/admin', verificarAdmin, async (req, res) => {
       SELECT
         p.*,
         c.nombre AS categoriaNombre,
-        GROUP_CONCAT(DISTINCT pi.url ORDER BY pi.orden) AS imagenes,
+        GROUP_CONCAT(DISTINCT CASE WHEN pi.tipo != 'video' THEN pi.url END ORDER BY pi.orden) AS imagenes,
+        MAX(CASE WHEN pi.tipo = 'video' THEN pi.url END) AS videoUrl,
         COUNT(DISTINCT pv.id) AS cantidadVariantes,
         COALESCE(SUM(DISTINCT pv.stock), 0) AS stockVariantes
       FROM productos p
       LEFT JOIN categorias c ON p.categoriaId = c.id
-      LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
+      LEFT JOIN producto_imagenes pi ON pi.productoId = p.id
       LEFT JOIN producto_variantes pv ON pv.productoId = p.id AND pv.deletedAt IS NULL
       WHERE p.deletedAt IS NULL
       GROUP BY p.id
@@ -227,7 +238,7 @@ router.post('/', verificarAdmin, async (req, res) => {
   try {
     const {
       categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
-      precio, precioOferta, nivelRequerido, rareza, peso, activo, imagenes,
+      precio, precioOferta, nivelRequerido, rareza, peso, activo, imagenes, videoUrl,
     } = req.body;
 
     if (!nombre || !slug || !categoriaId) {
@@ -248,7 +259,7 @@ router.post('/', verificarAdmin, async (req, res) => {
       ]
     );
 
-    await guardarImagenes(result.insertId, imagenes);
+    await guardarImagenes(result.insertId, imagenes, videoUrl);
 
     // Todo producto nace con una variante "Unica" para poder venderse
     // desde el primer momento. El admin carga el stock real en Variantes.
@@ -274,7 +285,7 @@ router.put('/:id', verificarAdmin, async (req, res) => {
   try {
     const {
       categoriaId, nombre, slug, descripcionCorta, descripcionLarga, lore,
-      precio, precioOferta, nivelRequerido, rareza, peso, activo, imagenes,
+      precio, precioOferta, nivelRequerido, rareza, peso, activo, imagenes, videoUrl,
     } = req.body;
 
     await pool.query(
@@ -293,7 +304,7 @@ router.put('/:id', verificarAdmin, async (req, res) => {
       ]
     );
 
-    await guardarImagenes(req.params.id, imagenes);
+    await guardarImagenes(req.params.id, imagenes, videoUrl);
 
     const [rows] = await pool.query('SELECT * FROM productos WHERE id = ?', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Producto no encontrado' });
@@ -337,7 +348,7 @@ router.get('/mas-vendidos', async (req, res) => {
       LEFT JOIN categorias c
         ON p.categoriaId = c.id
       LEFT JOIN producto_imagenes pi
-        ON p.id = pi.productoId
+        ON p.id = pi.productoId AND pi.tipo != 'video'
       INNER JOIN (
         SELECT pv.productoId, SUM(pdi.cantidad) AS totalVendido
         FROM pedido_items pdi
@@ -395,8 +406,12 @@ router.get('/:slug', async (req, res) => {
       [producto.id]
     );
 
+    // Trae fotos y video juntos, ordenados: las fotos primero (por su
+    // "orden"), y el video (tipo 'video') siempre al final.
     const [imagenes] = await pool.query(
-      'SELECT * FROM producto_imagenes WHERE productoId = ? ORDER BY orden',
+      `SELECT * FROM producto_imagenes
+       WHERE productoId = ?
+       ORDER BY (tipo = 'video') ASC, orden ASC`,
       [producto.id]
     );
 
