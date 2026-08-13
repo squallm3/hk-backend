@@ -24,12 +24,18 @@ router.get('/', verificarToken, async (req, res) => {
 // POST /api/misiones
 router.post('/', verificarToken, async (req, res) => {
   try {
-    const { sizigiaId, titulo, detalle, xpRecompensa } = req.body;
+    const { sizigiaId, titulo, detalle, xpRecompensa, descripcion, tags, finalizacion, subtareas } = req.body;
     const uuid = uuidv4();
     const [result] = await pool.query(`
-      INSERT INTO misiones (uuid, sizigiaId, usuarioId, titulo, detalle, xpRecompensa)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [uuid, sizigiaId, req.uid, titulo, detalle || null, xpRecompensa || 0]);
+      INSERT INTO misiones (uuid, sizigiaId, usuarioId, titulo, detalle, xpRecompensa, descripcion, tags, finalizacion, subtareas)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      uuid, sizigiaId, req.uid, titulo, detalle || null, xpRecompensa || 0,
+      descripcion || null,
+      tags ? JSON.stringify(tags) : null,
+      finalizacion || null,
+      subtareas ? JSON.stringify(subtareas) : null,
+    ]);
     const [rows] = await pool.query('SELECT * FROM misiones WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -41,13 +47,21 @@ router.post('/', verificarToken, async (req, res) => {
 // PUT /api/misiones/:id
 router.put('/:id', verificarToken, async (req, res) => {
   try {
-    const { titulo, detalle, xpRecompensa, fechaLimite, hora, horaActivada, repeticion } = req.body;
+    const { titulo, detalle, xpRecompensa, fechaLimite, hora, horaActivada, repeticion, descripcion, tags, finalizacion, subtareas } = req.body;
     await pool.query(`
       UPDATE misiones SET titulo=?, detalle=?, xpRecompensa=?, 
-      fechaLimite=?, hora=?, horaActivada=?, repeticion=?
+      fechaLimite=?, hora=?, horaActivada=?, repeticion=?,
+      descripcion=?, tags=?, finalizacion=?, subtareas=?
       WHERE id=? AND usuarioId=?
-    `, [titulo, detalle, xpRecompensa, fechaLimite || null, hora || null,
-        horaActivada || false, repeticion || null, req.params.id, req.uid]);
+    `, [
+      titulo, detalle, xpRecompensa, fechaLimite || null, hora || null,
+      horaActivada || false, repeticion || null,
+      descripcion || null,
+      tags ? JSON.stringify(tags) : null,
+      finalizacion || null,
+      subtareas ? JSON.stringify(subtareas) : null,
+      req.params.id, req.uid,
+    ]);
     const [rows] = await pool.query('SELECT * FROM misiones WHERE id = ?', [req.params.id]);
     res.json(rows[0]);
   } catch (err) {
