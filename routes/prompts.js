@@ -36,6 +36,50 @@ router.post('/', async (req, res) => {
   }
 });
 
+// POST /api/prompts/bulk - importar varios de una
+router.post('/bulk', async (req, res) => {
+  const items = req.body;
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'Se espera un array de prompts' });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    let insertados = 0;
+
+    for (const item of items) {
+      const title = (item.title || '').trim();
+      const content = item.content || '';
+      if (!title || !content.trim()) continue;
+
+      await connection.query(
+        `INSERT INTO prompts (uuid, title, category, content, favorite, docked, dockedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          uuidv4(),
+          title,
+          item.category || 'Sin categoría',
+          content,
+          item.favorite ? 1 : 0,
+          item.docked ? 1 : 0,
+          item.docked ? (item.dockedAt || Date.now()) : null
+        ]
+      );
+      insertados++;
+    }
+
+    await connection.commit();
+    res.status(201).json({ insertados });
+  } catch (err) {
+    await connection.rollback();
+    console.error('Error POST /api/prompts/bulk:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // PUT /api/prompts/:id - editar
 router.put('/:id', async (req, res) => {
   try {
