@@ -27,10 +27,39 @@ router.get('/perfil', verificarToken, async (req, res) => {
     if (usuarios.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
 
     const [personajes] = await pool.query(
-      'SELECT p.*, n.titulo, n.artefacto, n.imagenA, n.imagenB FROM personajes p JOIN niveles n ON p.nivelId = n.id WHERE p.usuarioId = ? AND p.activo = 1',
+      'SELECT * FROM personajes WHERE usuarioId = ? AND activo = 1',
       [req.uid]);
 
-    res.json({ ...usuarios[0], personaje: personajes[0] || null });
+    let personaje = null;
+
+    if (personajes.length > 0) {
+      personaje = personajes[0];
+
+      // El nivel guardado en personajes.nivelId puede no reflejar la XP
+      // real (otras apps solo suman XP sin actualizarlo). Calculamos el
+      // nivel real de la tienda comparando la XP acumulada contra los
+      // umbrales de la tabla niveles, sin tocar ni depender de nivelId.
+      const [nivelReal] = await pool.query(
+        `SELECT * FROM niveles
+         WHERE xpAcumulada <= ?
+         ORDER BY xpAcumulada DESC
+         LIMIT 1`,
+        [personaje.xpAcumulada || 0]
+      );
+
+      if (nivelReal.length > 0) {
+        personaje = {
+          ...personaje,
+          titulo: nivelReal[0].titulo,
+          artefacto: nivelReal[0].artefacto,
+          imagenA: nivelReal[0].imagenA,
+          imagenB: nivelReal[0].imagenB,
+          nivelId: nivelReal[0].id,
+        };
+      }
+    }
+
+    res.json({ ...usuarios[0], personaje });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
