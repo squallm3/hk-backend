@@ -13,6 +13,8 @@ const requestsByIp = new Map();
 const WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 10;
 
+const XP_POR_TIRADA = 777;
+
 function allowed(ip) {
   const now = Date.now();
   const previous = requestsByIp.get(ip) || [];
@@ -128,6 +130,7 @@ router.post('/interpretar', async (req, res) => {
 
     if (!response.ok) {
       console.error('Error Gemini:', JSON.stringify(data));
+
       return res.status(502).json({
         error: 'Gemini no pudo procesar la interpretación.',
         detalle: data?.error?.message || 'Error desconocido de Gemini.'
@@ -152,7 +155,11 @@ router.post('/interpretar', async (req, res) => {
       interpretation
     });
   } catch (error) {
-    console.error('Error POST /api/iching/interpretar:', error.message);
+    console.error(
+      'Error POST /api/iching/interpretar:',
+      error.message
+    );
+
     res.status(500).json({
       error: 'Error interno al consultar Gemini.'
     });
@@ -161,7 +168,12 @@ router.post('/interpretar', async (req, res) => {
 
 
 router.post('/tiradas', verificarToken, async (req, res) => {
-  const { question, hexagram, lines, relatingHexagram } = req.body;
+  const {
+    question,
+    hexagram,
+    lines,
+    relatingHexagram
+  } = req.body;
 
   if (
     !question ||
@@ -182,10 +194,15 @@ router.post('/tiradas', verificarToken, async (req, res) => {
     });
   }
 
+  const connection = await pool.getConnection();
+
   try {
+    await connection.beginTransaction();
+
     const uuid = crypto.randomUUID();
 
-    const [result] = await pool.query(
+    // 1. Guardar la tirada
+    const [result] = await connection.query(
       `INSERT INTO iching_tiradas
         (uuid, usuarioId, pregunta, hexagramaNumero, hexagramaNombre,
          dictamen, lineas, hexagramaResultanteNumero, hexagramaResultanteNombre)
@@ -198,17 +215,106 @@ router.post('/tiradas', verificarToken, async (req, res) => {
         String(hexagram.name).trim(),
         String(hexagram.judgement).trim(),
         JSON.stringify(lines),
-        relatingHexagram?.number ? Number(relatingHexagram.number) : null,
-        relatingHexagram?.name ? String(relatingHexagram.name).trim() : null
+        relatingHexagram?.number
+          ? Number(relatingHexagram.number)
+          : null,
+        relatingHexagram?.name
+          ? String(relatingHexagram.name).trim()
+          : null
       ]
     );
 
-    res.status(201).json({ id: result.insertId, uuid });
+    // 2. Sumar 777 XP de forma atómica
+    const [xpResult] = await connection.query(
+      `UPDATE personajes
+       SET xpAcumulada = GREATEST(0, xpAcumulada + ?)
+       WHERE usuarioId = ?
+         AND activo = 1`,
+      [XP_POR_TIRADA, req.uid]
+    );
+
+    if (xpResult.affectedRows === 0) {
+      throw new Error(
+        `No se encontró personaje activo para el usuario ${req.uid}`
+      );
+    }
+
+    // 3. Recalcular nivel según XP acumulada
+    const [personajeRows] = await connection.query(
+      `SELECT xpAcumulada
+       FROM personajes
+       WHERE usuarioId = ?
+         AND activo = 1
+       LIMIT 1`,
+      [req.uid]
+    );
+
+    if (!personajeRows.length) {
+      throw new Error('No se pudo recuperar el personaje.');
+    }
+
+    const xpAcumulada = personajeRows[0].xpAcumulada;
+
+    const [nivelRows] = await connection.query(
+      `SELECT id
+       FROM niveles
+       WHERE xpAcumulada <= ?
+       ORDER BY xpAcumulada DESC
+       LIMIT 1`,
+      [xpAcumulada]
+    );
+
+    const nivelId = nivelRows.length
+      ? nivelRows[0].id
+      : 1;
+
+    await connection.query(
+      `UPDATE personajes
+       SET nivelId = ?
+       WHERE usuarioId = ?
+         AND activo = 1`,
+      [nivelId, req.uid]
+    );
+
+    await connection.commit();
+
+    console.log(
+      '[POST tiradas] uid:',
+      req.uid,
+      '| tiradaId:',
+      result.insertId,
+      '| XP:',
+      `+${XP_POR_TIRADA}`,
+      '| xpAcumulada:',
+      xpAcumulada,
+      '| nivelId:',
+      nivelId
+    );
+
+    res.status(201).json({
+      id: result.insertId,
+      uuid,
+      xpGanada: XP_POR_TIRADA,
+      xpAcumulada,
+      nivelId
+    });
+
   } catch (error) {
-    console.error('Error POST /api/iching/tiradas:', error.message);
-    res.status(500).json({ error: 'No se pudo guardar la tirada.' });
+    await connection.rollback();
+
+    console.error(
+      'Error POST /api/iching/tiradas:',
+      error.message
+    );
+
+    res.status(500).json({
+      error: 'No se pudo guardar la tirada ni otorgar la experiencia.'
+    });
+  } finally {
+    connection.release();
   }
 });
+
 
 router.get('/tiradas', verificarToken, async (req, res) => {
   try {
@@ -224,37 +330,65 @@ router.get('/tiradas', verificarToken, async (req, res) => {
 
     res.json(rows);
   } catch (error) {
-    console.error('Error GET /api/iching/tiradas:', error.message);
-    res.status(500).json({ error: 'No se pudo obtener el historial.' });
-  }
-});
-
-router.patch('/tiradas/:id/interpretacion', verificarToken, async (req, res) => {
-  const { interpretation } = req.body;
-
-  if (!interpretation || String(interpretation).trim().length > 12000) {
-    return res.status(400).json({
-      error: 'La interpretación no es válida.'
-    });
-  }
-
-  try {
-    const [result] = await pool.query(
-      `UPDATE iching_tiradas
-       SET interpretacionIA = ?
-       WHERE id = ? AND usuarioId = ?`,
-      [String(interpretation).trim(), req.params.id, req.uid]
+    console.error(
+      'Error GET /api/iching/tiradas:',
+      error.message
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Tirada no encontrada.' });
-    }
-
-    res.json({ ok: true });
-  } catch (error) {
-    console.error('Error PATCH /api/iching/tiradas/:id/interpretacion:', error.message);
-    res.status(500).json({ error: 'No se pudo guardar la interpretación.' });
+    res.status(500).json({
+      error: 'No se pudo obtener el historial.'
+    });
   }
 });
+
+
+router.patch(
+  '/tiradas/:id/interpretacion',
+  verificarToken,
+  async (req, res) => {
+    const { interpretation } = req.body;
+
+    if (
+      !interpretation ||
+      String(interpretation).trim().length > 12000
+    ) {
+      return res.status(400).json({
+        error: 'La interpretación no es válida.'
+      });
+    }
+
+    try {
+      const [result] = await pool.query(
+        `UPDATE iching_tiradas
+         SET interpretacionIA = ?
+         WHERE id = ? AND usuarioId = ?`,
+        [
+          String(interpretation).trim(),
+          req.params.id,
+          req.uid
+        ]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          error: 'Tirada no encontrada.'
+        });
+      }
+
+      res.json({ ok: true });
+
+    } catch (error) {
+      console.error(
+        'Error PATCH /api/iching/tiradas/:id/interpretacion:',
+        error.message
+      );
+
+      res.status(500).json({
+        error: 'No se pudo guardar la interpretación.'
+      });
+    }
+  }
+);
+
 
 module.exports = router;
