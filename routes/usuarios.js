@@ -19,6 +19,16 @@ router.post('/sync', verificarToken, async (req, res) => {
   }
 });
 
+// GET /api/usuarios/whoami — verificacion liviana de identidad para otras apps del ecosistema
+router.get('/whoami', verificarToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT rol FROM usuarios WHERE id = ?', [req.uid]);
+    res.json({ uid: req.uid, email: req.email, rol: rows[0]?.rol || 'cliente' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/usuarios/perfil
 router.get('/perfil', verificarToken, async (req, res) => {
   try {
