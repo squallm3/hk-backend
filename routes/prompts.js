@@ -2,12 +2,19 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db/conexion');
 const { v4: uuidv4 } = require('uuid');
+const { verificarToken } = require('../middleware/auth');
 
-// GET /api/prompts - listar todos
-router.get('/', async (req, res) => {
+// Todas las rutas de prompts requieren autenticación Firebase.
+// req.uid contiene el UID verificado del usuario.
+
+// GET /api/prompts - listar los prompts del usuario autenticado
+router.get('/', verificarToken, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM prompts WHERE deletedAt IS NULL ORDER BY docked DESC, dockedAt DESC, updatedAt DESC'
+      `SELECT * FROM prompts
+       WHERE usuario_id = ? AND deletedAt IS NULL
+       ORDER BY docked DESC, dockedAt DESC, updatedAt DESC`,
+      [req.uid]
     );
     res.json(rows);
   } catch (err) {
@@ -16,19 +23,34 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/prompts - crear
-router.post('/', async (req, res) => {
+// POST /api/prompts - crear un prompt para el usuario autenticado
+router.post('/', verificarToken, async (req, res) => {
   try {
     const { title, category, content } = req.body;
+
     if (!title || !content) {
       return res.status(400).json({ error: 'Faltan title o content' });
     }
+
     const [result] = await pool.query(
-      `INSERT INTO prompts (uuid, title, category, content, favorite, docked)
-       VALUES (?, ?, ?, ?, 0, 0)`,
-      [uuidv4(), title, category || 'Sin categoría', content]
+      `INSERT INTO prompts
+       (uuid, usuario_id, title, category, content, favorite, docked)
+       VALUES (?, ?, ?, ?, ?, 0, 0)`,
+      [
+        uuidv4(),
+        req.uid,
+        title,
+        category || 'Sin categoría',
+        content
+      ]
     );
-    const [rows] = await pool.query('SELECT * FROM prompts WHERE id = ?', [result.insertId]);
+
+    const [rows] = await pool.query(
+      `SELECT * FROM prompts
+       WHERE id = ? AND usuario_id = ?`,
+      [result.insertId, req.uid]
+    );
+
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('Error POST /api/prompts:', err.message);
@@ -36,28 +58,34 @@ router.post('/', async (req, res) => {
   }
 });
 
-// POST /api/prompts/bulk - importar varios de una
-router.post('/bulk', async (req, res) => {
+// POST /api/prompts/bulk - importar varios prompts para el usuario autenticado
+router.post('/bulk', verificarToken, async (req, res) => {
   const items = req.body;
+
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Se espera un array de prompts' });
   }
 
   const connection = await pool.getConnection();
+
   try {
     await connection.beginTransaction();
+
     let insertados = 0;
 
     for (const item of items) {
       const title = (item.title || '').trim();
       const content = item.content || '';
+
       if (!title || !content.trim()) continue;
 
       await connection.query(
-        `INSERT INTO prompts (uuid, title, category, content, favorite, docked, dockedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO prompts
+         (uuid, usuario_id, title, category, content, favorite, docked, dockedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuidv4(),
+          req.uid,
           title,
           item.category || 'Sin categoría',
           content,
@@ -66,6 +94,7 @@ router.post('/bulk', async (req, res) => {
           item.docked ? (item.dockedAt || Date.now()) : null
         ]
       );
+
       insertados++;
     }
 
@@ -80,18 +109,38 @@ router.post('/bulk', async (req, res) => {
   }
 });
 
-// PUT /api/prompts/:id - editar
-router.put('/:id', async (req, res) => {
+// PUT /api/prompts/:id - editar solamente prompts propios
+router.put('/:id', verificarToken, async (req, res) => {
   try {
     const { title, category, content, favorite, docked } = req.body;
     const dockedAt = docked ? Date.now() : null;
-    await pool.query(
-      `UPDATE prompts SET title = ?, category = ?, content = ?, favorite = ?, docked = ?, dockedAt = ?
-       WHERE id = ? AND deletedAt IS NULL`,
-      [title, category, content, favorite ? 1 : 0, docked ? 1 : 0, dockedAt, req.params.id]
+
+    const [result] = await pool.query(
+      `UPDATE prompts
+       SET title = ?, category = ?, content = ?, favorite = ?, docked = ?, dockedAt = ?
+       WHERE id = ? AND usuario_id = ? AND deletedAt IS NULL`,
+      [
+        title,
+        category,
+        content,
+        favorite ? 1 : 0,
+        docked ? 1 : 0,
+        dockedAt,
+        req.params.id,
+        req.uid
+      ]
     );
-    const [rows] = await pool.query('SELECT * FROM prompts WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Prompt no encontrado' });
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Prompt no encontrado' });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT * FROM prompts
+       WHERE id = ? AND usuario_id = ? AND deletedAt IS NULL`,
+      [req.params.id, req.uid]
+    );
+
     res.json(rows[0]);
   } catch (err) {
     console.error('Error PUT /api/prompts:', err.message);
@@ -99,10 +148,20 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/prompts/:id - soft delete
-router.delete('/:id', async (req, res) => {
+// DELETE /api/prompts/:id - soft delete solamente de prompts propios
+router.delete('/:id', verificarToken, async (req, res) => {
   try {
-    await pool.query('UPDATE prompts SET deletedAt = NOW() WHERE id = ?', [req.params.id]);
+    const [result] = await pool.query(
+      `UPDATE prompts
+       SET deletedAt = NOW()
+       WHERE id = ? AND usuario_id = ? AND deletedAt IS NULL`,
+      [req.params.id, req.uid]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Prompt no encontrado' });
+    }
+
     res.json({ mensaje: 'Prompt eliminado' });
   } catch (err) {
     console.error('Error DELETE /api/prompts:', err.message);
