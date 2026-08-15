@@ -80,6 +80,7 @@ app.use('/api/dieta', dietaRouter);
 const presupuestoRouter = require('./routes/presupuesto');
 app.use('/api/presupuesto', presupuestoRouter);
 
-app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
 const ichingRouter = require('./routes/iching');
 app.use('/api/iching', ichingRouter);
+
+app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));

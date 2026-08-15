@@ -1,4 +1,7 @@
 const express = require('express');
+const crypto = require('crypto');
+const pool = require('../db/conexion');
+const { verificarToken } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -153,6 +156,104 @@ router.post('/interpretar', async (req, res) => {
     res.status(500).json({
       error: 'Error interno al consultar Gemini.'
     });
+  }
+});
+
+
+router.post('/tiradas', verificarToken, async (req, res) => {
+  const { question, hexagram, lines, relatingHexagram } = req.body;
+
+  if (
+    !question ||
+    !hexagram ||
+    !hexagram.number ||
+    !hexagram.name ||
+    !hexagram.judgement ||
+    !Array.isArray(lines)
+  ) {
+    return res.status(400).json({
+      error: 'Faltan datos obligatorios de la tirada.'
+    });
+  }
+
+  if (String(question).trim().length > 500) {
+    return res.status(400).json({
+      error: 'La pregunta no puede superar los 500 caracteres.'
+    });
+  }
+
+  try {
+    const uuid = crypto.randomUUID();
+
+    const [result] = await pool.query(
+      `INSERT INTO iching_tiradas
+        (uuid, usuarioId, pregunta, hexagramaNumero, hexagramaNombre,
+         dictamen, lineas, hexagramaResultanteNumero, hexagramaResultanteNombre)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        uuid,
+        req.uid,
+        String(question).trim(),
+        Number(hexagram.number),
+        String(hexagram.name).trim(),
+        String(hexagram.judgement).trim(),
+        JSON.stringify(lines),
+        relatingHexagram?.number ? Number(relatingHexagram.number) : null,
+        relatingHexagram?.name ? String(relatingHexagram.name).trim() : null
+      ]
+    );
+
+    res.status(201).json({ id: result.insertId, uuid });
+  } catch (error) {
+    console.error('Error POST /api/iching/tiradas:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la tirada.' });
+  }
+});
+
+router.get('/tiradas', verificarToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, uuid, pregunta, hexagramaNumero, hexagramaNombre,
+              dictamen, lineas, hexagramaResultanteNumero,
+              hexagramaResultanteNombre, interpretacionIA, createdAt, updatedAt
+       FROM iching_tiradas
+       WHERE usuarioId = ?
+       ORDER BY createdAt DESC`,
+      [req.uid]
+    );
+
+    res.json(rows);
+  } catch (error) {
+    console.error('Error GET /api/iching/tiradas:', error.message);
+    res.status(500).json({ error: 'No se pudo obtener el historial.' });
+  }
+});
+
+router.patch('/tiradas/:id/interpretacion', verificarToken, async (req, res) => {
+  const { interpretation } = req.body;
+
+  if (!interpretation || String(interpretation).trim().length > 12000) {
+    return res.status(400).json({
+      error: 'La interpretación no es válida.'
+    });
+  }
+
+  try {
+    const [result] = await pool.query(
+      `UPDATE iching_tiradas
+       SET interpretacionIA = ?
+       WHERE id = ? AND usuarioId = ?`,
+      [String(interpretation).trim(), req.params.id, req.uid]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Tirada no encontrada.' });
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error PATCH /api/iching/tiradas/:id/interpretacion:', error.message);
+    res.status(500).json({ error: 'No se pudo guardar la interpretación.' });
   }
 });
 
