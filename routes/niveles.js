@@ -12,46 +12,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/niveles/con-productos - niveles con sus productos agrupados
+// GET /api/niveles/con-productos - niveles con sus 3 imagenes (A, B y 3D)
+// El nombre del endpoint se mantiene por compatibilidad, pero ya no
+// agrupa productos: cada nivel muestra su artefacto en las 3 vistas.
 router.get('/con-productos', async (req, res) => {
   try {
     const [niveles] = await pool.query(
-      'SELECT id, uuid, titulo, artefacto, imagenA, imagenB, xpAcumulada FROM niveles ORDER BY id'
+      'SELECT id, uuid, titulo, artefacto, imagenA, imagenB, imagenA3d, xpAcumulada FROM niveles ORDER BY id'
     );
 
-    const [productos] = await pool.query(`
-      SELECT
-        p.id, p.uuid, p.nombre, p.slug, p.descripcionCorta,
-        p.precio, p.precioOferta,
-        p.nivelRequerido, p.rareza, p.stock,
-        c.nombre AS categoriaNombre,
-        GROUP_CONCAT(pi.url ORDER BY pi.orden) AS imagenes
-      FROM productos p
-      LEFT JOIN categorias c ON p.categoriaId = c.id
-      LEFT JOIN producto_imagenes pi ON p.id = pi.productoId
-      WHERE p.activo = 1
-      GROUP BY p.id
-      ORDER BY p.id
-    `);
-
-    const productosNormalizados = productos.map((producto) => ({
-      ...producto,
-      imagenes: producto.imagenes
-        ? producto.imagenes
-            .split(',')
-            .map((img) => img.trim())
-            .filter(Boolean)
-        : [],
-    }));
-
-    const resultado = niveles.map((nivel) => ({
-      ...nivel,
-      productos: productosNormalizados.filter(
-        (producto) => (producto.nivelRequerido || 1) === nivel.id
-      ),
-    }));
-
-    res.json(resultado);
+    res.json(niveles);
   } catch (err) {
     console.error('Error GET /api/niveles/con-productos:', err.message);
     res.status(500).json({ error: err.message });
