@@ -68,4 +68,65 @@ router.post('/:id/sizigias', verificarToken, async (req, res) => {
   }
 });
 
+// PUT /api/pleromos/sizigias/:id — renombrar una sizigia
+router.put('/sizigias/:id', verificarToken, async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    if (!nombre) return res.status(400).json({ error: 'El nombre es requerido' });
+    await pool.query(
+      `UPDATE sizigias s
+       JOIN pleromos p ON s.pleromiId = p.id
+       SET s.nombre = ?
+       WHERE s.id = ? AND p.usuarioId = ?`,
+      [nombre, req.params.id, req.uid]
+    );
+    const [rows] = await pool.query('SELECT * FROM sizigias WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Sizigia no encontrada' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Error PUT /api/pleromos/sizigias/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/pleromos/sizigias/:id — elimina la sizigia y sus misiones (soft delete)
+router.delete('/sizigias/:id', verificarToken, async (req, res) => {
+  try {
+    // Verificar que la sizigia pertenezca a un pleromo del usuario
+    const [check] = await pool.query(
+      `SELECT s.id FROM sizigias s
+       JOIN pleromos p ON s.pleromiId = p.id
+       WHERE s.id = ? AND p.usuarioId = ?`,
+      [req.params.id, req.uid]
+    );
+    if (check.length === 0) return res.status(404).json({ error: 'Sizigia no encontrada' });
+
+    await pool.query('UPDATE misiones SET deletedAt = NOW() WHERE sizigiaId = ?', [req.params.id]);
+    await pool.query('UPDATE sizigias SET deletedAt = NOW() WHERE id = ?', [req.params.id]);
+
+    res.json({ mensaje: 'Eliminada' });
+  } catch (err) {
+    console.error('Error DELETE /api/pleromos/sizigias/:id:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/misiones/completadas/:sizigiaId — borra todas las misiones completadas de una sizigia
+router.delete('/misiones-completadas/:sizigiaId', verificarToken, async (req, res) => {
+  try {
+    await pool.query(
+      `UPDATE misiones m
+       JOIN sizigias s ON m.sizigiaId = s.id
+       JOIN pleromos p ON s.pleromiId = p.id
+       SET m.deletedAt = NOW()
+       WHERE m.sizigiaId = ? AND m.completada = 1 AND p.usuarioId = ?`,
+      [req.params.sizigiaId, req.uid]
+    );
+    res.json({ mensaje: 'Completadas eliminadas' });
+  } catch (err) {
+    console.error('Error DELETE misiones-completadas:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
