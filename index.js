@@ -71,6 +71,9 @@ app.use('/api/categorias-gasto', categoriasGastoRouter);
 const transaccionesRouter = require('./routes/transacciones');
 app.use('/api/transacciones', transaccionesRouter);
 
+const transferenciasRouter = require('./routes/transferencias');
+app.use('/api/transferencias', transferenciasRouter);
+
 const promptsRouter = require('./routes/prompts');
 app.use('/api/prompts', promptsRouter);
 
