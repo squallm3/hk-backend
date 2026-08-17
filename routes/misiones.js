@@ -47,21 +47,38 @@ router.post('/', verificarToken, async (req, res) => {
 // PUT /api/misiones/:id
 router.put('/:id', verificarToken, async (req, res) => {
   try {
-    const { titulo, detalle, xpRecompensa, fechaLimite, hora, horaActivada, repeticion, descripcion, tags, finalizacion, subtareas } = req.body;
-    await pool.query(`
-      UPDATE misiones SET titulo=?, detalle=?, xpRecompensa=?, 
-      fechaLimite=?, hora=?, horaActivada=?, repeticion=?,
-      descripcion=?, tags=?, finalizacion=?, subtareas=?
-      WHERE id=? AND usuarioId=?
-    `, [
-      titulo, detalle, xpRecompensa, fechaLimite || null, hora || null,
-      horaActivada || false, repeticion || null,
-      descripcion || null,
-      tags ? JSON.stringify(tags) : null,
-      finalizacion || null,
-      subtareas ? JSON.stringify(subtareas) : null,
-      req.params.id, req.uid,
-    ]);
+    const { titulo, detalle, xpRecompensa, fechaLimite, hora, horaActivada, repeticion, descripcion, tags, finalizacion, subtareas, orden, ordenGlobal } = req.body;
+
+    const fields = [];
+    const values = [];
+    const maybeSet = (col, val) => {
+      if (val !== undefined) { fields.push(`${col} = ?`); values.push(val); }
+    };
+
+    maybeSet('titulo', titulo);
+    maybeSet('detalle', detalle);
+    maybeSet('xpRecompensa', xpRecompensa);
+    maybeSet('fechaLimite', fechaLimite || null);
+    maybeSet('hora', hora || null);
+    maybeSet('horaActivada', horaActivada || false);
+    maybeSet('repeticion', repeticion || null);
+    maybeSet('descripcion', descripcion);
+    maybeSet('tags', tags !== undefined ? (tags ? JSON.stringify(tags) : null) : undefined);
+    maybeSet('finalizacion', finalizacion);
+    maybeSet('subtareas', subtareas !== undefined ? (subtareas ? JSON.stringify(subtareas) : null) : undefined);
+    maybeSet('orden', orden);
+    maybeSet('ordenGlobal', ordenGlobal);
+
+    if (fields.length === 0) {
+      const [rows] = await pool.query('SELECT * FROM misiones WHERE id = ?', [req.params.id]);
+      return res.json(rows[0]);
+    }
+
+    values.push(req.params.id, req.uid);
+    await pool.query(
+      `UPDATE misiones SET ${fields.join(', ')} WHERE id=? AND usuarioId=?`,
+      values
+    );
     const [rows] = await pool.query('SELECT * FROM misiones WHERE id = ?', [req.params.id]);
     res.json(rows[0]);
   } catch (err) {
