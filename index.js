@@ -80,6 +80,9 @@ app.use('/api/prompts', promptsRouter);
 const dietaRouter = require('./routes/dieta');
 app.use('/api/dieta', dietaRouter);
 
+const alimentosRouter = require('./routes/alimentos');
+app.use('/api/alimentos', alimentosRouter);
+
 const presupuestoRouter = require('./routes/presupuesto');
 app.use('/api/presupuesto', presupuestoRouter);
 
