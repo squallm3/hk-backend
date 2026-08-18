@@ -46,10 +46,51 @@ router.get('/admin', verificarAdmin, async (req, res) => {
   }
 });
 
+// PUT /api/tipos-articulo-nivel/precios - actualiza el precio de varios tipos a la vez
+router.put('/precios', verificarAdmin, async (req, res) => {
+  const connection = await pool.getConnection();
+  try {
+    const { precios } = req.body; // [{ id, precio }, ...]
+
+    if (!Array.isArray(precios) || precios.length === 0) {
+      return res.status(400).json({ error: 'Falta la lista de precios' });
+    }
+
+    await connection.beginTransaction();
+
+    for (const item of precios) {
+      await connection.query(
+        'UPDATE tipos_articulo_nivel SET precio = ? WHERE id = ?',
+        [Number(item.precio) || 0, item.id]
+      );
+    }
+
+    await connection.commit();
+
+    const [rows] = await pool.query(
+      'SELECT * FROM tipos_articulo_nivel ORDER BY orden'
+    );
+    const tipos = rows.map((t) => ({
+      ...t,
+      tallesDisponibles: t.tallesDisponibles
+        ? t.tallesDisponibles.split(',').map((s) => s.trim())
+        : [],
+    }));
+
+    res.json(tipos);
+  } catch (err) {
+    await connection.rollback();
+    console.error('Error PUT /api/tipos-articulo-nivel/precios:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // POST /api/tipos-articulo-nivel - crear
 router.post('/', verificarAdmin, async (req, res) => {
   try {
-    const { nombre, requiereTalle, tallesDisponibles, requiereColor, activo } = req.body;
+    const { nombre, requiereTalle, tallesDisponibles, requiereColor, precio, activo } = req.body;
 
     if (!nombre) {
       return res.status(400).json({ error: 'Falta el nombre' });
@@ -65,12 +106,13 @@ router.post('/', verificarAdmin, async (req, res) => {
 
     const [result] = await pool.query(
       `INSERT INTO tipos_articulo_nivel
-       (uuid, nombre, requiereTalle, tallesDisponibles, requiereColor, orden, activo)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (uuid, nombre, requiereTalle, tallesDisponibles, requiereColor, precio, orden, activo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         uuidv4(), nombre,
         requiereTalle ? 1 : 0, talles,
         requiereColor ? 1 : 0,
+        Number(precio) || 0,
         maximo[0].maximo + 1,
         activo === false ? 0 : 1,
       ]
@@ -89,7 +131,7 @@ router.post('/', verificarAdmin, async (req, res) => {
 // PUT /api/tipos-articulo-nivel/:id - editar
 router.put('/:id', verificarAdmin, async (req, res) => {
   try {
-    const { nombre, requiereTalle, tallesDisponibles, requiereColor, activo } = req.body;
+    const { nombre, requiereTalle, tallesDisponibles, requiereColor, precio, activo } = req.body;
 
     const talles = Array.isArray(tallesDisponibles)
       ? tallesDisponibles.join(',')
@@ -98,11 +140,12 @@ router.put('/:id', verificarAdmin, async (req, res) => {
     await pool.query(
       `UPDATE tipos_articulo_nivel SET
         nombre = ?, requiereTalle = ?, tallesDisponibles = ?,
-        requiereColor = ?, activo = ?
+        requiereColor = ?, precio = ?, activo = ?
        WHERE id = ?`,
       [
         nombre, requiereTalle ? 1 : 0, talles,
         requiereColor ? 1 : 0,
+        Number(precio) || 0,
         activo === false ? 0 : 1,
         req.params.id,
       ]
