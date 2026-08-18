@@ -89,4 +89,7 @@ app.use('/api/presupuesto', presupuestoRouter);
 const ichingRouter = require('./routes/iching');
 app.use('/api/iching', ichingRouter);
 
+const tiposArticuloNivelRouter = require('./routes/tipos-articulo-nivel');
+app.use('/api/tipos-articulo-nivel', tiposArticuloNivelRouter);
+
 app.listen(PORT, () => console.log(`HK Backend corriendo en puerto ${PORT}`));
