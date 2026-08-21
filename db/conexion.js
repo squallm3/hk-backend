@@ -6,6 +6,7 @@ const pool = mysql.createPool({
   user: process.env.DB_USER || 'haikus',
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME || 'haiku_gnostico',
+  charset: 'utf8mb4',
   waitForConnections: true,
   connectionLimit: 10,
 });
