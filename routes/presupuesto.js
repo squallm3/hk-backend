@@ -7,12 +7,6 @@ const { randomUUID } = require('crypto');
 // GET /api/presupuesto?mes=YYYY-MM
 // Devuelve, para cada categoría: lo asignado ESTE mes, lo gastado ESTE mes,
 // y el "disponible" ACUMULADO (arrastra el sobrante o el déficit de meses anteriores).
-//
-// Caso especial: la categoría "Ajustes de saldo" (donde caen los ajustes de
-// conciliación de cuentas) suma el NETO de sus movimientos, positivos y
-// negativos, en vez de contar solo los negativos como el resto de las
-// categorías. Así "Disponible" en esa fila siempre muestra el saldo a favor
-// (o en contra) real, listo para repartir entre otras categorías.
 router.get('/', verificarToken, async (req, res) => {
   try {
     const mes = req.query.mes;
@@ -25,16 +19,11 @@ router.get('/', verificarToken, async (req, res) => {
          cg.nombre AS categoriaNombre,
          COALESCE(pc.montoAsignado, 0) AS montoAsignado,
          COALESCE((
-           SELECT SUM(
-             CASE
-               WHEN cg.nombre = 'Ajustes de saldo' THEN -t.monto
-               WHEN t.monto < 0 THEN -t.monto
-               ELSE 0
-             END
-           ) FROM transacciones t
+           SELECT SUM(-t.monto) FROM transacciones t
            WHERE t.categoriaId = cg.id
              AND t.usuarioId = ?
              AND t.deletedAt IS NULL
+             AND t.monto < 0
              AND DATE_FORMAT(t.fecha, '%Y-%m') = ?
          ), 0) AS gastado,
          COALESCE((
@@ -43,16 +32,11 @@ router.get('/', verificarToken, async (req, res) => {
          ), 0)
          -
          COALESCE((
-           SELECT SUM(
-             CASE
-               WHEN cg.nombre = 'Ajustes de saldo' THEN -t2.monto
-               WHEN t2.monto < 0 THEN -t2.monto
-               ELSE 0
-             END
-           ) FROM transacciones t2
+           SELECT SUM(-t2.monto) FROM transacciones t2
            WHERE t2.categoriaId = cg.id
              AND t2.usuarioId = ?
              AND t2.deletedAt IS NULL
+             AND t2.monto < 0
              AND DATE_FORMAT(t2.fecha, '%Y-%m') <= ?
          ), 0) AS disponible
        FROM categorias_gasto cg
@@ -68,7 +52,9 @@ router.get('/', verificarToken, async (req, res) => {
   }
 });
 
-// POST /api/presupuesto - asigna (o actualiza) el monto de una categoría para un mes
+// POST /api/presupuesto - asigna (o actualiza) el monto de una categoría para un mes.
+// Acepta valores negativos a propósito: permite "devolver" plata de una categoría
+// al pozo de Sin Asignar escribiendo un numero negativo.
 router.post('/', verificarToken, async (req, res) => {
   try {
     const { categoriaId, mes, montoAsignado } = req.body;
