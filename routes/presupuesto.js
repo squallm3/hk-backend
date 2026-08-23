@@ -7,6 +7,14 @@ const { randomUUID } = require('crypto');
 // GET /api/presupuesto?mes=YYYY-MM
 // Devuelve, para cada categoría: lo asignado ESTE mes, lo gastado ESTE mes,
 // y el "disponible" ACUMULADO (arrastra el sobrante o el déficit de meses anteriores).
+//
+// Caso especial: "Ajustes de saldo" (donde caen los ajustes de conciliación)
+// funciona distinto al resto:
+//  - Gastado sigue mostrando solo los movimientos negativos de este mes (igual que siempre).
+//  - Disponible NO resta lo gastado: suma el acumulado de TODOS los movimientos
+//    POSITIVOS de esta categoría (ignorando los negativos), más lo que se le
+//    asigne a mano. Así, poner un numero negativo en "Asignado" es la unica
+//    forma de "liberar" esa plata hacia Sin Asignar.
 router.get('/', verificarToken, async (req, res) => {
   try {
     const mes = req.query.mes;
@@ -32,11 +40,16 @@ router.get('/', verificarToken, async (req, res) => {
          ), 0)
          -
          COALESCE((
-           SELECT SUM(-t2.monto) FROM transacciones t2
+           SELECT
+             CASE
+               WHEN cg.nombre = 'Ajustes de saldo'
+                 THEN -SUM(CASE WHEN t2.monto > 0 THEN t2.monto ELSE 0 END)
+               ELSE SUM(CASE WHEN t2.monto < 0 THEN -t2.monto ELSE 0 END)
+             END
+           FROM transacciones t2
            WHERE t2.categoriaId = cg.id
              AND t2.usuarioId = ?
              AND t2.deletedAt IS NULL
-             AND t2.monto < 0
              AND DATE_FORMAT(t2.fecha, '%Y-%m') <= ?
          ), 0) AS disponible
        FROM categorias_gasto cg
@@ -53,8 +66,7 @@ router.get('/', verificarToken, async (req, res) => {
 });
 
 // POST /api/presupuesto - asigna (o actualiza) el monto de una categoría para un mes.
-// Acepta valores negativos a propósito: permite "devolver" plata de una categoría
-// al pozo de Sin Asignar escribiendo un numero negativo.
+// Acepta valores negativos a propósito.
 router.post('/', verificarToken, async (req, res) => {
   try {
     const { categoriaId, mes, montoAsignado } = req.body;
