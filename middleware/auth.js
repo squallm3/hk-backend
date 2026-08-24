@@ -25,6 +25,23 @@ async function verificarToken(req, res, next) {
   }
 }
 
+// Nuevo middleware para modo invitado: deja pasar si no hay token, pero valida si lo hay
+async function verificarTokenOpcional(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decoded = await getAuth().verifyIdToken(token);
+    req.uid = decoded.uid;
+    req.email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Token inválido' });
+  }
+}
+
 // Verifica que el usuario ademas tenga rol de administrador
 async function verificarAdmin(req, res, next) {
   verificarToken(req, res, async () => {
@@ -47,4 +64,4 @@ async function verificarAdmin(req, res, next) {
   });
 }
 
-module.exports = { verificarToken, verificarAdmin };
+module.exports = { verificarToken, verificarTokenOpcional, verificarAdmin };
