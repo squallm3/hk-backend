@@ -39,12 +39,13 @@ router.post('/', verificarToken, async (req, res) => {
 
     for (const item of items) {
       await connection.query(
-        `INSERT INTO pedido_items (uuid, pedidoId, varianteId, cantidad, precioUnitario, nombreProducto)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO pedido_items (uuid, pedidoId, varianteId, personalizacion, cantidad, precioUnitario, nombreProducto)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           uuidv4(),
           pedidoId,
           item.varianteId,
+          item.personalizacion ? JSON.stringify(item.personalizacion) : null,
           item.cantidad,
           item.precioUnitario,
           item.nombreProducto,
