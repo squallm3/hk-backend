@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/conexion');
+const { verificarToken } = require('../middleware/auth');
 
 // GET /api/alimentos/buscar?q=texto
 // Busca en la tabla local de alimentos (sin tocar Gemini para nada).
@@ -27,7 +28,7 @@ router.get('/buscar', async (req, res) => {
 
 // POST /api/alimentos/:uuid/usar
 // Suma un uso, para que los alimentos más elegidos aparezcan primero.
-router.post('/:uuid/usar', async (req, res) => {
+router.post('/:uuid/usar', verificarToken, async (req, res) => {
   try {
     await pool.query(
       `UPDATE alimentos SET vecesUsado = vecesUsado + 1 WHERE uuid = ? AND deletedAt IS NULL`,
