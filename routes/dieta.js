@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { verificarTokenOpcional } = require('../middleware/auth');
+const { verificarToken } = require('../middleware/auth');
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
@@ -18,27 +18,10 @@ const NUTRICION_SCHEMA = {
   required: ['nombre', 'porcion', 'calorias', 'proteinas_g', 'carbohidratos_g', 'grasas_g'],
 };
 
-// Chequeo híbrido: si tiene req.uid (pasó el token opcional) está autorizado por Firebase.
-// Si no tiene req.uid, exigimos el secreto de la app (modo invitado).
-function verificarAccesoHibrido(req, res, next) {
-  if (req.uid) {
-    return next();
-  }
-
-  const secreto = req.headers['x-app-secret'];
-  if (!process.env.DIETA_APP_SECRET) {
-    console.error('Falta DIETA_APP_SECRET en el entorno del servidor');
-    return res.status(500).json({ error: 'servidor mal configurado' });
-  }
-  if (secreto !== process.env.DIETA_APP_SECRET) {
-    return res.status(401).json({ error: 'no autorizado (requiere login o secreto valido)' });
-  }
-  next();
-}
-
 // POST /api/dieta/estimar  { descripcion }
-// Hace de proxy hacia Gemini: la GEMINI_API_KEY vive solo en el servidor.
-router.post('/estimar', verificarTokenOpcional, verificarAccesoHibrido, async (req, res) => {
+// Requiere login (Firebase) siempre: ya no existe modo invitado con secreto compartido.
+// La GEMINI_API_KEY vive solo en el servidor.
+router.post('/estimar', verificarToken, async (req, res) => {
   try {
     const { descripcion } = req.body;
     if (typeof descripcion !== 'string' || !descripcion.trim()) {

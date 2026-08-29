@@ -83,6 +83,9 @@ app.use('/api/dieta', dietaRouter);
 const alimentosRouter = require('./routes/alimentos');
 app.use('/api/alimentos', alimentosRouter);
 
+const registroRouter = require('./routes/registro');
+app.use('/api/registro', registroRouter);
+
 const presupuestoRouter = require('./routes/presupuesto');
 app.use('/api/presupuesto', presupuestoRouter);
 
